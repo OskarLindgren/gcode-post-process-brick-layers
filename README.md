@@ -16,6 +16,7 @@ This project implements a **crude "brick layering" post-processing script** for 
 
 ### **Known Bugs**
 - When the number of wall loops is even and wall order is set to "inner-outer-inner", the staggering pattern isn't applied correctly to all walls. (the 2 outer-most inner walls both have bricking applied). This is due to incomplete handling of wall print sequence logic.
+- Walls are still printed based on position in xy plane, so if the nozzle has a large surface around the opening, that will cause the raised layer to be flattened down to some degree, it's unclear if this makes the part weaker or stronger, more testing is needed
 - **Non-Specific Known Issue:**
 - Some slicer settings might break the script.
 ---
