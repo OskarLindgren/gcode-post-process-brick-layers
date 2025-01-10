@@ -21,7 +21,7 @@ stuff = os.listdir()
 
 for thing in stuff:
     if thing.endswith(".gcode"):
-        my_file = f"{cur_loc}\{thing}"
+        my_file = f"{cur_loc}\\{thing}"
         break
 
 # find variables
