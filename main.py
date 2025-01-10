@@ -14,20 +14,38 @@
 
 import os
 
+### debug
+DEBUG = False
+
+def namestr(obj, namespace):
+    return [name for name in namespace if namespace[name] is obj]
+
+def debug(st:str) -> None:
+    if DEBUG:
+        print(f"{namestr(st, globals())} || {st}", end="\n")
+
+def soft_debug(st) -> None:
+    if DEBUG:
+        print(st, end="\n")
+### debug end
+
 cur_loc = os.path.dirname(os.path.abspath(__file__))
 os.chdir(cur_loc)
+debug(cur_loc)
 
 stuff = os.listdir()
 
 for thing in stuff:
     if thing.endswith(".gcode"):
         my_file = f"{cur_loc}\\{thing}"
+        debug(my_file)
         break
 
 # find variables
 # this is easier if we read the whole file to memory
 with open(my_file, "r") as f:
     all_gcode = f.read().split("\n")
+    debug(len(all_gcode))
 
 
 # read the file in reverse to find the config block first and not go through the whole file
@@ -57,7 +75,7 @@ while True:
 
     # find wall print sequence
     if line.startswith("; wall_sequence"):
-        WALL_SEQUENCE = str(line.split(" = ")[1].split(" ")[0]) 
+        WALL_SEQUENCE = str(line.split(" = ")[1]) 
 
     # find incompatible settings
     if line == "; spiral_mode = 1" or line == "; alternate_extra_wall = 1":
@@ -73,24 +91,27 @@ while True:
 
             exit(1)
 
-# read it the normal direction to find max_z_heaight
+# read it the normal direction to find max_z_height
 n=-1
 while True:
     n+=1
     line = all_gcode[n]
     # find total object height
     if line.startswith("; max_z_height:"):
-        # after model is done, z is increased by 2mm
         TOTAL_MODEL_HEIGHT = float(line.split(": ")[1])
         break
-
-print("initial layer height:", INITIAL_LAYER_HEIGHT)
-print("layer height:", LAYER_HEIGHT)
-print("wall count:", WALL_COUNT)
-print("wall sequence:", WALL_SEQUENCE)
-print("top surface count:", TOP_SURFACE_COUNT)
-print("bottom surface count:", BOTTOM_SURFACE_COUNT)
-print("total model height:", TOTAL_MODEL_HEIGHT)
+    
+try:
+    print("initial layer height:", INITIAL_LAYER_HEIGHT)
+    print("layer height:", LAYER_HEIGHT)
+    print("wall count:", WALL_COUNT)
+    print("wall sequence:", WALL_SEQUENCE)
+    print("top surface count:", TOP_SURFACE_COUNT)
+    print("bottom surface count:", BOTTOM_SURFACE_COUNT)
+    print("total model height:", TOTAL_MODEL_HEIGHT)
+except NameError as e:
+    print("\n---\n", e, "\n---\n")
+    exit(1)
 
 
 LAYER_HEIGHT_TO_START = LAYER_HEIGHT * BOTTOM_SURFACE_COUNT + LAYER_HEIGHT
@@ -114,6 +135,8 @@ flag_start = False
 flag_stop = False
 flag_is_elevated = False
 flag_first_time = True
+flag_start_found = False
+flag_stop_found = False
 
 
 
@@ -128,10 +151,12 @@ while n < len(all_gcode):
 
     if line.startswith(f";LAYER_CHANGE"):
         if LAYER_HEIGHT_TO_START.is_integer():
-            if f";Z:{int(LAYER_HEIGHT_TO_START)}" in all_gcode[n+1]:
+            if not flag_start_found and f";Z:{int(LAYER_HEIGHT_TO_START)}" in all_gcode[n+1]:
                 START_POINT = n
+                flag_start_found = True
         else:
-            if f";Z:{LAYER_HEIGHT_TO_START}" in all_gcode[n+1]:
+            if not flag_start_found and f";Z:{LAYER_HEIGHT_TO_START}" in all_gcode[n+1]:
+                flag_start_found = True
                 START_POINT = n
 
     # forcefully comment each time we go between inner wall loops
@@ -140,11 +165,32 @@ while n < len(all_gcode):
     elif line.startswith(";TYPE:") and "Inner wall" not in line:
         cur_type_is_inner_wall = False
 
-    # THIS IS SO GROSS AND DEPENDS ON THE TRAVEL PATH BETWEEN WALLS AND SLICER SETTINGS, EW
-    if line.startswith("M204 ") and cur_type_is_inner_wall:
-        #-print("!")
-        if all_gcode[n-1].startswith("G1 ") and all_gcode[n-2].startswith("M204 "):
-            if not all_gcode[n+1].startswith(";TYPE:"):
+    # Find travel moves absed on extruder movement rate rather than m204 command (i was dumb)
+    # this is still gross though - lol
+    if line.startswith("G1") and cur_type_is_inner_wall:
+        # check extrusion rate
+        if "E" in line.upper():
+            # get position of E attribute
+            extrusion_rate = None
+            e_rate_start = None
+            e_rate_stop = None
+            for temp_n, char in enumerate(line):
+                if char.upper() == "E":
+                    e_rate_start = temp_n
+                if e_rate_start and char == " " or e_rate_start and temp_n == len(line)-1:
+                    e_rate_stop = temp_n
+            try:
+                extrusion_rate = float(line[e_rate_start+1:e_rate_stop])
+            except ValueError as e:
+                print("G1 command syntax not supported (please report this issue)")
+                print(temp_n)
+                print(len(line))
+                print(n)
+                exit(1)
+        else: extrusion_rate = 0
+
+        if extrusion_rate == 0: # G1 line is travel move, negative E would be retraction
+            if all_gcode[n+1].startswith("G1") and ("X" in all_gcode[n+1] or "Y" in all_gcode[n+1]):
                 all_gcode.insert(n+1, ";TYPE:Inner wall")
                 n+=1
 
@@ -164,8 +210,8 @@ while n < len(all_gcode):
 n = START_POINT
 adaptive_stop_point = STOP_POINT
 next_wall_should_be_brick = False
+print(n, adaptive_stop_point)
 while n < adaptive_stop_point:
-    #-print(n)
     line = all_gcode[n]
     if ";LAYER_CHANGE" in line:
         current_layer_height = float(all_gcode[n+1].split(":")[1])
