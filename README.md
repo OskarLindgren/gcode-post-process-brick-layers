@@ -19,6 +19,7 @@ This project implements a **crude "brick layering" post-processing script** for 
 - Walls are still printed based on position in xy plane, so if the nozzle has a large surface around the opening, that will cause the raised layer to be flattened down to some degree, it's unclear if this makes the part weaker or stronger, more testing is needed ***(A FIX FOR THIS US LIKELY TO BE FIXED 2025-01-11 OR 2025-01-12, the issue is known and a solution is in the works)***
 - **Non-Specific Known Issue:**
 - Some slicer settings might break the script.
+- G0 moves are not supported, please ensure that travel moves are G1 moves
 ---
 
 ## **Requirements**
