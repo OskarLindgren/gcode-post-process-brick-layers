@@ -78,8 +78,8 @@ while True:
         WALL_SEQUENCE = str(line.split(" = ")[1]) 
 
     # find incompatible settings
-    if line == "; spiral_mode = 1" or line == "; alternate_extra_wall = 1":
-        print("ERROR: cringe settings detected")
+    if line == "; spiral_mode = 1" or line == "; alternate_extra_wall = 1" or line == "; enable_arc_fitting = 1":
+        print("ERROR: unsupported settings detected")
         exit(1)
 
     # all info should be listed by now
@@ -121,19 +121,19 @@ LAYER_HEIGHT_TO_STOP = TOTAL_MODEL_HEIGHT - LAYER_HEIGHT * TOP_SURFACE_COUNT
 print("start height:", LAYER_HEIGHT_TO_START)
 print("stop height:", LAYER_HEIGHT_TO_STOP)
 
-# do every other wall, correcting for wall print sequence and wall count
+# correct for wall print sequence and wall count
 #-if WALL_SEQUENCE == "inner-outer-inner":
-#-    flag_first_wall = WALL_COUNT % 2 == 0
+#-    flag_alt_wall = WALL_COUNT % 2 == 0
 #-elif WALL_SEQUENCE == "outer-inner":
-#-    flag_first_wall = True # outer walls are never given a chance to be raised
-#-elif WALL_SEQUENCE == "inner-outer":
-#-    flag_first_wall = WALL_COUNT % 2 == 0
+#-    flag_alt_wall = True # outer walls are never given a chance to be raised
+#-elif WALL_SEQUENCE == "inner wall/outer wall":
+#-    flag_alt_wall = True
 
 # define flags
-flag_alt_wall = True #flag_first_wall 
+flag_alt_wall = False 
 flag_start = False
 flag_stop = False
-flag_is_elevated = False
+#-flag_is_elevated = False
 flag_first_time = True
 flag_start_found = False
 flag_stop_found = False
@@ -141,14 +141,14 @@ flag_stop_found = False
 
 
 
-# find start point
-# (this is just a code optimization, it does the same thing as earlier version
+# (this is just a code optimization, it would work with jsut one while loop
 # but makes less conditional checks every iteration)
 n = 0
 cur_type_is_inner_wall = False
 while n < len(all_gcode):
     line = all_gcode[n]
 
+    # find start point
     if line.startswith(f";LAYER_CHANGE"):
         if LAYER_HEIGHT_TO_START.is_integer():
             if not flag_start_found and f";Z:{int(LAYER_HEIGHT_TO_START)}" in all_gcode[n+1]:
@@ -159,7 +159,7 @@ while n < len(all_gcode):
                 flag_start_found = True
                 START_POINT = n
 
-    # forcefully comment each time we go between inner wall loops
+    # verbose comments are added by this script, this is what this reads
     if line.startswith(";TYPE:Inner wall"):
         cur_type_is_inner_wall = True
     elif line.startswith(";TYPE:") and "Inner wall" not in line:
@@ -179,20 +179,29 @@ while n < len(all_gcode):
                     e_rate_start = temp_n
                 if e_rate_start and char == " " or e_rate_start and temp_n == len(line)-1:
                     e_rate_stop = temp_n
+                    break
             try:
-                extrusion_rate = float(line[e_rate_start+1:e_rate_stop])
+                extrusion_rate = float(line[e_rate_start+1:e_rate_stop+1])
             except ValueError as e:
-                print("G1 command syntax not supported (please report this issue)")
+                print(e)
+                print("something weird happened - (please report this issue)")
                 print(temp_n)
                 print(len(line))
                 print(n)
+                print(all_gcode[n])
                 exit(1)
         else: extrusion_rate = 0
 
+        # forcefully comment each time we go between inner wall loops
         if extrusion_rate == 0: # G1 line is travel move, negative E would be retraction
             if all_gcode[n+1].startswith("G1") and ("X" in all_gcode[n+1] or "Y" in all_gcode[n+1]):
-                all_gcode.insert(n+1, ";TYPE:Inner wall")
-                n+=1
+                # make sure ;TYPE:Inner wall isn't already set 1 or 2 lines above
+                if ";TYPE:Inner" not in all_gcode[n-1] and ";TYPE:Inner" not in all_gcode[n-2]:
+                    #-print(n)
+                    #-print(all_gcode[n])
+                    #-print(all_gcode[n+1])     
+                    all_gcode.insert(n+1, ";TYPE:Inner wall")
+                    n+=1
 
     if line.startswith(f";LAYER_CHANGE"):
         if LAYER_HEIGHT_TO_STOP.is_integer():
@@ -209,8 +218,7 @@ while n < len(all_gcode):
 # read through the file
 n = START_POINT
 adaptive_stop_point = STOP_POINT
-next_wall_should_be_brick = False
-print(n, adaptive_stop_point)
+#--next_wall_should_be_brick = not flag_alt_wall
 while n < adaptive_stop_point:
     line = all_gcode[n]
     if ";LAYER_CHANGE" in line:
@@ -218,35 +226,35 @@ while n < adaptive_stop_point:
 
     # figure out what walls should be changed
     if ";TYPE:Inner wall" in line:
-        if next_wall_should_be_brick:
-            flag_alt_wall = True
-            next_wall_should_be_brick = False
+        #--if next_wall_should_be_brick:
+        #--    flag_alt_wall = True
+        #--    next_wall_should_be_brick = False
         if flag_alt_wall:
             print("!", end="")
             all_gcode.insert(n, f"G1 Z{round(current_layer_height + LAYER_HEIGHT*0.5, 3)} ; BRICK_WALL_ON")
             adaptive_stop_point+=1
-            flag_is_elevated = True
+            #-flag_is_elevated = True
             flag_alt_wall = False
             n+=1
         else:
             print("?", end="")
-            if flag_is_elevated:
-                all_gcode.insert(n, f"G1 Z{current_layer_height} ; BRICK_WALL_OFF")
-                adaptive_stop_point+=1
-                flag_alt_wall = True
-                flag_is_elevated = False
-                n+=1
+            #if flag_is_elevated:
+            all_gcode.insert(n, f"G1 Z{current_layer_height} ; BRICK_WALL_OFF")
+            adaptive_stop_point+=1
+            flag_alt_wall = True
+            #-flag_is_elevated = False
+            n+=1
 
     # never brick outer walls
     elif ";TYPE:Outer wall" in line:
-        if flag_is_elevated:
-            next_wall_should_be_brick = True
-            print("/", end="")
-            all_gcode.insert(n, f"G1 Z{current_layer_height} ; BRICK_WALL_OFF")
-            adaptive_stop_point+=1
-            flag_alt_wall = not flag_alt_wall
-            n+=1
-            flag_is_elevated = False
+        #-if flag_alt_wall: #flag_is_elevated:
+            #--next_wall_should_be_brick = True
+        print("/", end="")
+        all_gcode.insert(n, f"G1 Z{current_layer_height} ; BRICK_WALL_OFF")
+        adaptive_stop_point+=1
+        flag_alt_wall = not flag_alt_wall
+        n+=1
+            #-flag_is_elevated = False
 
     # dont stop bricking because of infill
     # this leads to less weird gcode previews
@@ -261,6 +269,14 @@ while n < adaptive_stop_point:
             flag_is_elevated = False
 
     n+=1
+
+# sort all layers by height, ensuring nozzle doesn't hit raised wall when printing non-raised wall
+
+# each "layer" should be from the first time that a layer that's evenly
+# divisible by the layer height is mentioned, to the line before the first time
+# that the next layer that's evenly divisible by the layer height is mentioned
+
+
 print("\nDone!")
 
 
